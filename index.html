@@ -459,6 +459,7 @@
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 
 <script>
 'use strict';
@@ -596,9 +597,10 @@ function parseZPL(content) {
 
 /**
  * Parse one ^XA...^XZ block into field descriptors.
+ * Supports: text, barcode (CODE128/CODE39/QR), box (GB),
+ *           inline bitmap (GFA), reverse field (FR), rotated fields.
  */
 function parseBlock(block) {
-  // Split on ^ — each token is a command
   const tokens = block.split('^').map(t => t.trim()).filter(Boolean);
 
   const fields = [];
@@ -606,15 +608,20 @@ function parseBlock(block) {
     lhX: 0, lhY: 0,
     foX: 0, foY: 0,
     fontH: 20, fontW: 20,
+    fontRot: 'N',   // N, R, L, I
     block: null,
     hexMode: false,
     barWidth: 2,
+    frMode: false,  // ^FR — reverse next field
     pendingBC: null,
+    pendingB3: null,
+    pendingBQ: null,
   };
 
   for (const tok of tokens) {
     const UP = tok.toUpperCase();
 
+    // ── Position / font ──────────────────────────
     if (UP.startsWith('LH')) {
       const [x = 0, y = 0] = tok.slice(2).split(',').map(Number);
       st.lhX = x; st.lhY = y;
@@ -624,74 +631,134 @@ function parseBlock(block) {
       st.foX = st.lhX + (parseInt(parts[0]) || 0);
       st.foY = st.lhY + (parseInt(parts[1]) || 0);
 
-    } else if (/^A0N?,/i.test(tok)) {
-      // ^A0N,h,w  or  ^A0,h,w
-      const rest = tok.replace(/^A0N?,/i, '');
+    } else if (/^A0[NnRrLlIi]/i.test(tok)) {
+      // ^A0N,h,w | ^A0R,h,w | ^A0L,h,w | ^A0I,h,w
+      const rot = tok[2] ? tok[2].toUpperCase() : 'N';
+      st.fontRot = /[RNLI]/.test(rot) ? rot : 'N';
+      const rest = tok.slice(3).replace(/^,/, '');
       const parts = rest.split(',');
       st.fontH = parseInt(parts[0]) || 20;
-      st.fontW = parseInt(parts[1]) || 20;
+      st.fontW = parseInt(parts[1]) || st.fontH;
       st.block = null;
 
     } else if (UP.startsWith('FB')) {
       const parts = tok.slice(2).split(',');
       st.block = {
-        width: parseInt(parts[0]) || 300,
-        maxLines: parseInt(parts[1]) || 1,
+        width:     parseInt(parts[0]) || 300,
+        maxLines:  parseInt(parts[1]) || 1,
         lineSpacing: parseInt(parts[2]) || 0,
-        just: (parts[3] || 'L').toUpperCase().trim(),
+        just:      (parts[3] || 'L').toUpperCase().trim(),
       };
 
     } else if (UP === 'FH') {
       st.hexMode = true;
 
+    } else if (UP === 'FR') {
+      st.frMode = true;
+
+    // ── Barcodes ─────────────────────────────────
     } else if (UP.startsWith('BY')) {
       st.barWidth = parseInt(tok.slice(2).split(',')[0]) || 2;
 
-    } else if (/^BCN?,/i.test(tok)) {
-      // ^BCN,height,printInterpLine,above
-      const rest = tok.replace(/^BCN?,/i, '');
+    } else if (/^BCN?[,RNLBI]/i.test(tok)) {
+      // ^BCN,height,...  — Code 128
+      const rest = tok.replace(/^BCN?,?/i, '');
       const parts = rest.split(',');
-      st.pendingBC = {
-        height: parseInt(parts[0]) || 50,
-        barWidth: st.barWidth,
-      };
+      st.pendingBC = { height: parseInt(parts[0]) || 50, barWidth: st.barWidth };
 
-    } else if (UP.startsWith('FD')) {
-      let data = tok.slice(2).trim();
-
-      if (st.hexMode) {
-        data = decodeZPLHex(data);
-        st.hexMode = false;
+    } else if (/^B3/i.test(tok)) {
+      // ^B3[orientation][,check,height,hri]  — Code 39
+      const raw = tok.slice(2);
+      let orientation = 'N';
+      let rest = raw;
+      if (/^[RNLBI]/i.test(raw)) {
+        orientation = raw[0].toUpperCase();
+        rest = raw.slice(1);
       }
+      const parts = rest.replace(/^,/, '').split(',');
+      const height = parseInt(parts[1]) || parseInt(parts[0]) || 60;
+      st.pendingB3 = { orientation, height, barWidth: st.barWidth };
 
-      if (st.pendingBC) {
-        if (data) {
-          fields.push({
-            type: 'barcode',
-            x: st.foX, y: st.foY,
-            data,
-            height: st.pendingBC.height,
-            barWidth: st.pendingBC.barWidth,
-          });
-        }
-        st.pendingBC = null;
-      } else if (data) {
+    } else if (/^BQN?/i.test(tok)) {
+      // ^BQN,model,magnification  — QR Code
+      const parts = tok.replace(/^BQN?,?/i, '').split(',');
+      st.pendingBQ = { mag: parseInt(parts[1]) || 4 };
+
+    // ── Graphics ──────────────────────────────────
+    } else if (/^GF[AB]/i.test(tok)) {
+      // ^GFA,dataLen,totalBytes,bytesPerRow,[type:]Z64:data:crc
+      const m = tok.match(/^GF[AB],\d+,\d+,(\d+),[^:]*:Z64:([A-Za-z0-9+/=\s]+):([0-9A-Fa-f]{4})/i);
+      if (m) {
+        const reverse = st.frMode; st.frMode = false;
         fields.push({
-          type: 'text',
+          type: 'gfa',
           x: st.foX, y: st.foY,
-          data,
-          fontH: st.fontH,
-          fontW: st.fontW,
-          block: st.block ? { ...st.block } : null,
+          bpr: parseInt(m[1]),
+          b64: m[2].replace(/\s/g, ''),
+          reverse,
         });
       }
+
+    } else if (UP.startsWith('GB')) {
+      // ^GBw,h,thickness,color,rounding
+      const parts = tok.slice(2).split(',');
+      let color = (parts[3] || 'B').trim().toUpperCase();
+      if (st.frMode) { color = color === 'B' ? 'W' : 'B'; st.frMode = false; }
+      fields.push({
+        type: 'box',
+        x: st.foX, y: st.foY,
+        w: parseInt(parts[0]) || 0,
+        h: parseInt(parts[1]) || 0,
+        thickness: parseInt(parts[2]) || 1,
+        color,
+      });
+
+    // ── Field data ────────────────────────────────
+    } else if (UP.startsWith('FD')) {
+      let data = tok.slice(2).trim();
+      if (st.hexMode) { data = decodeZPLHex(data); st.hexMode = false; }
+
+      // \& is ZPL line-break within ^FB context
+      if (data.includes('\\&')) data = data.replace(/\\&/g, '\n');
+
+      const reverse = st.frMode; st.frMode = false;
+
+      if (st.pendingBC) {
+        if (data) fields.push({ type: 'barcode', format: 'CODE128', rotation: 'N',
+          x: st.foX, y: st.foY, data, height: st.pendingBC.height, barWidth: st.pendingBC.barWidth });
+        st.pendingBC = null;
+
+      } else if (st.pendingB3) {
+        if (data) fields.push({ type: 'barcode', format: 'CODE39',
+          rotation: st.pendingB3.orientation,
+          x: st.foX, y: st.foY, data, height: st.pendingB3.height, barWidth: st.pendingB3.barWidth });
+        st.pendingB3 = null;
+
+      } else if (st.pendingBQ) {
+        // QR FD data: "[errLevel][recLevel],[actual_data]"
+        let qrData = data;
+        const qm = data.match(/^[A-Z][A-Z]?,(.+)$/s);
+        if (qm) qrData = qm[1];
+        if (qrData) fields.push({ type: 'qr',
+          x: st.foX, y: st.foY, data: qrData, mag: st.pendingBQ.mag });
+        st.pendingBQ = null;
+
+      } else if (data) {
+        fields.push({ type: 'text',
+          x: st.foX, y: st.foY, data,
+          fontH: st.fontH, fontW: st.fontW,
+          rotation: st.fontRot,
+          block: st.block ? { ...st.block } : null,
+          reverse });
+      }
       st.block = null;
+      st.fontRot = 'N';
 
     } else if (UP === 'FS') {
       st.hexMode = false;
-      st.pendingBC = null;
+      st.frMode  = false;
+      st.pendingBC = st.pendingB3 = st.pendingBQ = null;
     }
-    // Ignore: XA, XZ, CI, LH (handled), etc.
   }
 
   return fields;
@@ -707,15 +774,35 @@ const MM_PER_DOT    = 25.4 / 203; // physical size (203 dpi Zebra)
 function getBounds(fields) {
   let maxX = 120, maxY = 120;
   for (const f of fields) {
-    if (f.type === 'text') {
-      const w = f.block
-        ? f.block.width
-        : Math.min(f.data.length * f.fontW * 0.65, 600);
-      maxX = Math.max(maxX, f.x + w);
-      maxY = Math.max(maxY, f.y + f.fontH + 4);
-    } else {
-      maxX = Math.max(maxX, f.x + 160); // estimate barcode width
-      maxY = Math.max(maxY, f.y + f.height + 4);
+    if (f.type === 'box') {
+      maxX = Math.max(maxX, f.x + f.w);
+      maxY = Math.max(maxY, f.y + f.h);
+    } else if (f.type === 'gfa') {
+      maxX = Math.max(maxX, f.x + f.bpr * 8);
+      maxY = Math.max(maxY, f.y + 60);
+    } else if (f.type === 'qr') {
+      const size = f.mag * 40;
+      maxX = Math.max(maxX, f.x + size);
+      maxY = Math.max(maxY, f.y + size);
+    } else if (f.type === 'text') {
+      const rot = f.rotation || 'N';
+      const charW = Math.min(f.data.length * f.fontW * 0.65, 600);
+      const blockW = f.block ? f.block.width : charW;
+      if (rot === 'R' || rot === 'L') {
+        maxX = Math.max(maxX, f.x + f.fontH + 4);
+        maxY = Math.max(maxY, f.y + blockW);
+      } else {
+        maxX = Math.max(maxX, f.x + blockW);
+        maxY = Math.max(maxY, f.y + f.fontH + 4);
+      }
+    } else if (f.type === 'barcode') {
+      if (f.rotation === 'R' || f.rotation === 'L') {
+        maxX = Math.max(maxX, f.x + f.height + 20);
+        maxY = Math.max(maxY, f.y + 250);
+      } else {
+        maxX = Math.max(maxX, f.x + 200);
+        maxY = Math.max(maxY, f.y + f.height + 4);
+      }
     }
   }
   return { w: maxX + 24, h: maxY + 24 };
@@ -738,6 +825,101 @@ function wrapText(ctx, text, maxPx) {
   return lines;
 }
 
+function renderBox(ctx, f, S) {
+  const x = Math.round(f.x * S);
+  const y = Math.round(f.y * S);
+  const w = Math.round(f.w * S);
+  const h = Math.round(f.h * S);
+  const t = Math.max(1, Math.round(f.thickness * S));
+  const filled = f.thickness >= Math.min(f.w, f.h);
+  ctx.fillStyle   = f.color === 'B' ? '#000000' : '#ffffff';
+  ctx.strokeStyle = f.color === 'B' ? '#000000' : '#ffffff';
+  ctx.lineWidth   = t;
+  if (filled) {
+    ctx.fillRect(x, y, w, h);
+  } else {
+    ctx.strokeRect(x + t / 2, y + t / 2, w - t, h - t);
+  }
+}
+
+function renderText(ctx, f, S) {
+  const px   = Math.round(f.fontH * S);
+  const rot  = f.rotation || 'N';
+  const fill = f.reverse ? '#ffffff' : '#000000';
+  ctx.font          = `${px}px Arial, sans-serif`;
+  ctx.textBaseline  = 'top';
+  ctx.fillStyle     = fill;
+
+  const x = Math.round(f.x * S);
+  const y = Math.round(f.y * S);
+
+  // Split on \n (from \& or multi-line) then render lines
+  const rawLines = f.data.split('\n');
+
+  function drawLines(ox, oy, maxW) {
+    const lineH = Math.round(px * 1.25);
+    if (f.block && f.block.maxLines > 1 && !rawLines[1]) {
+      const wrapped = wrapText(ctx, rawLines[0], maxW || 9999);
+      wrapped.slice(0, f.block.maxLines).forEach((l, i) =>
+        ctx.fillText(l, ox, oy + i * lineH, maxW || undefined));
+    } else {
+      const allLines = rawLines.flatMap(l =>
+        f.block && f.block.maxLines > 1 ? wrapText(ctx, l, maxW || 9999) : [l]);
+      const visible = f.block ? allLines.slice(0, f.block.maxLines) : allLines;
+      visible.forEach((l, i) => ctx.fillText(l, ox, oy + i * lineH, maxW || undefined));
+    }
+  }
+
+  ctx.save();
+  if (rot === 'R') {
+    ctx.translate(x + px, y);
+    ctx.rotate(Math.PI / 2);
+    drawLines(0, 0, f.block ? f.block.width * S : undefined);
+  } else if (rot === 'L') {
+    ctx.translate(x, y);
+    ctx.rotate(-Math.PI / 2);
+    drawLines(-f.data.length * (f.fontW || f.fontH) * 0.65 * S, 0);
+  } else if (rot === 'I') {
+    ctx.translate(x, y + px);
+    ctx.rotate(Math.PI);
+    drawLines(0, 0, f.block ? f.block.width * S : undefined);
+  } else {
+    drawLines(x, y, f.block ? f.block.width * S : undefined);
+  }
+  ctx.restore();
+}
+
+async function renderBitmap1bit(b64, bpr, reverse) {
+  const binStr    = atob(b64);
+  const compressed = new Uint8Array(binStr.length);
+  for (let i = 0; i < binStr.length; i++) compressed[i] = binStr.charCodeAt(i);
+  let raw;
+  try { raw = pako.inflate(compressed); } catch (e) { raw = pako.inflateRaw(compressed); }
+
+  const rows = Math.floor(raw.length / bpr);
+  const cols = bpr * 8;
+  const cv   = document.createElement('canvas');
+  cv.width = cols; cv.height = rows;
+  const ctx  = cv.getContext('2d');
+  const img  = ctx.createImageData(cols, rows);
+  const px   = img.data;
+  for (let row = 0; row < rows; row++) {
+    for (let b = 0; b < bpr; b++) {
+      const byte = raw[row * bpr + b];
+      for (let bit = 7; bit >= 0; bit--) {
+        const col = b * 8 + (7 - bit);
+        const isBlack = (byte >> bit) & 1;
+        const idx = (row * cols + col) * 4;
+        const c = reverse ? (isBlack ? 255 : 0) : (isBlack ? 0 : 255);
+        px[idx] = px[idx+1] = px[idx+2] = c;
+        px[idx+3] = 255;
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return cv;
+}
+
 async function renderPage(fields) {
   const { w, h } = getBounds(fields);
   const S = PIXEL_PER_DOT;
@@ -750,43 +932,61 @@ async function renderPage(fields) {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   for (const f of fields) {
-    if (f.type === 'text') {
-      const px = Math.round(f.fontH * S);
-      ctx.font = `${px}px Arial, sans-serif`;
-      ctx.fillStyle = '#000000';
-      ctx.textBaseline = 'top';
+    if (f.type === 'box') {
+      renderBox(ctx, f, S);
 
-      const x = Math.round(f.x * S);
-      const y = Math.round(f.y * S);
+    } else if (f.type === 'gfa') {
+      try {
+        const bmp = await renderBitmap1bit(f.b64, f.bpr, f.reverse);
+        ctx.drawImage(bmp, Math.round(f.x * S), Math.round(f.y * S),
+          Math.round(bmp.width * S), Math.round(bmp.height * S));
+      } catch (e) { console.warn('GFA error:', e.message); }
 
-      if (f.block && f.block.maxLines > 1) {
-        const maxPx   = f.block.width * S;
-        const lines   = wrapText(ctx, f.data, maxPx);
-        const visible = lines.slice(0, f.block.maxLines);
-        const lineH   = Math.round(px * 1.25);
-        for (let i = 0; i < visible.length; i++) {
-          ctx.fillText(visible[i], x, y + i * lineH, maxPx);
-        }
-      } else {
-        const maxW = f.block ? f.block.width * S : undefined;
-        ctx.fillText(f.data, x, y, maxW);
-      }
+    } else if (f.type === 'text') {
+      renderText(ctx, f, S);
 
     } else if (f.type === 'barcode') {
       try {
-        const bc = document.createElement('canvas');
+        const bc  = document.createElement('canvas');
         JsBarcode(bc, f.data, {
-          format: 'CODE128',
+          format:       f.format || 'CODE128',
           width:        Math.max(1, f.barWidth * S),
           height:       Math.round(f.height * S),
           displayValue: false,
           margin:       0,
           background:   '#ffffff',
         });
-        ctx.drawImage(bc, Math.round(f.x * S), Math.round(f.y * S));
-      } catch (e) {
-        console.warn(`Barcode error [${f.data}]:`, e.message);
-      }
+        const x   = Math.round(f.x * S);
+        const y   = Math.round(f.y * S);
+        const rot = f.rotation || 'N';
+        if (rot === 'R') {
+          ctx.save();
+          ctx.translate(x + bc.height, y);
+          ctx.rotate(Math.PI / 2);
+          ctx.drawImage(bc, 0, -bc.height);
+          ctx.restore();
+        } else if (rot === 'L') {
+          ctx.save();
+          ctx.translate(x, y + bc.width);
+          ctx.rotate(-Math.PI / 2);
+          ctx.drawImage(bc, 0, 0);
+          ctx.restore();
+        } else {
+          ctx.drawImage(bc, x, y);
+        }
+      } catch (e) { console.warn(`Barcode error [${f.data}]:`, e.message); }
+
+    } else if (f.type === 'qr') {
+      try {
+        const size = Math.round(f.mag * 40 * S);
+        const qrCanvas = document.createElement('canvas');
+        await new Promise((res, rej) =>
+          QRCode.toCanvas(qrCanvas, f.data, {
+            width: size, margin: 0, errorCorrectionLevel: 'M',
+            color: { dark: '#000000', light: '#ffffff' },
+          }, err => err ? rej(err) : res()));
+        ctx.drawImage(qrCanvas, Math.round(f.x * S), Math.round(f.y * S), size, size);
+      } catch (e) { console.warn('QR error:', e.message); }
     }
   }
 
