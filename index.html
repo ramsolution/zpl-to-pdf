@@ -850,9 +850,6 @@ function renderText(ctx, f, S) {
   const px   = Math.round(f.fontH * S);
   const rot  = f.rotation || 'N';
   const fill = f.reverse ? '#ffffff' : '#000000';
-  ctx.font          = `${px}px Arial, sans-serif`;
-  ctx.textBaseline  = 'top';
-  ctx.fillStyle     = fill;
 
   const x = Math.round(f.x * S);
   const y = Math.round(f.y * S);
@@ -861,16 +858,35 @@ function renderText(ctx, f, S) {
   const rawLines = f.data.split('\n');
 
   function drawLines(ox, oy, maxW) {
+    // Re-apply font/color inside transform to avoid state pollution from ctx.restore()
+    ctx.font         = `${px}px Arial, sans-serif`;
+    ctx.textBaseline = 'top';
+    ctx.fillStyle    = fill;
+
     const lineH = Math.round(px * 1.25);
+    const just  = f.block ? (f.block.just || 'L').toUpperCase() : 'L';
+
+    function drawLine(l, oy2) {
+      if (just === 'C' && maxW) {
+        // Center text within block width
+        const tw = ctx.measureText(l).width;
+        ctx.fillText(l, ox + (maxW - Math.min(tw, maxW)) / 2, oy2);
+      } else if (just === 'R' && maxW) {
+        const tw = ctx.measureText(l).width;
+        ctx.fillText(l, ox + maxW - Math.min(tw, maxW), oy2);
+      } else {
+        ctx.fillText(l, ox, oy2, maxW || undefined);
+      }
+    }
+
     if (f.block && f.block.maxLines > 1 && !rawLines[1]) {
       const wrapped = wrapText(ctx, rawLines[0], maxW || 9999);
-      wrapped.slice(0, f.block.maxLines).forEach((l, i) =>
-        ctx.fillText(l, ox, oy + i * lineH, maxW || undefined));
+      wrapped.slice(0, f.block.maxLines).forEach((l, i) => drawLine(l, oy + i * lineH));
     } else {
       const allLines = rawLines.flatMap(l =>
         f.block && f.block.maxLines > 1 ? wrapText(ctx, l, maxW || 9999) : [l]);
       const visible = f.block ? allLines.slice(0, f.block.maxLines) : allLines;
-      visible.forEach((l, i) => ctx.fillText(l, ox, oy + i * lineH, maxW || undefined));
+      visible.forEach((l, i) => drawLine(l, oy + i * lineH));
     }
   }
 
@@ -983,16 +999,23 @@ async function renderPage(fields) {
       } catch (e) { console.warn(`Barcode error [${f.data}]:`, e.message); }
 
     } else if (f.type === 'qr') {
-      try {
-        const size = Math.round(f.mag * 40 * S);
-        const qrCanvas = document.createElement('canvas');
-        await new Promise((res, rej) =>
-          QRCode.toCanvas(qrCanvas, f.data, {
-            width: size, margin: 0, errorCorrectionLevel: 'M',
-            color: { dark: '#000000', light: '#ffffff' },
-          }, err => err ? rej(err) : res()));
-        ctx.drawImage(qrCanvas, Math.round(f.x * S), Math.round(f.y * S), size, size);
-      } catch (e) { console.warn('QR error:', e.message); }
+      const size = Math.round(f.mag * 40 * S);
+      const qrCanvas = document.createElement('canvas');
+      // Try error levels from highest capacity (L) to lowest (H)
+      let qrOk = false;
+      for (const ecl of ['L', 'M', 'Q', 'H']) {
+        try {
+          await new Promise((res, rej) =>
+            QRCode.toCanvas(qrCanvas, f.data, {
+              width: size, margin: 0, errorCorrectionLevel: ecl,
+              color: { dark: '#000000', light: '#ffffff' },
+            }, err => err ? rej(err) : res()));
+          ctx.drawImage(qrCanvas, Math.round(f.x * S), Math.round(f.y * S), size, size);
+          qrOk = true;
+          break;
+        } catch (e) { /* try next level */ }
+      }
+      if (!qrOk) console.warn('QR code failed for all error correction levels');
     }
   }
 
