@@ -999,23 +999,32 @@ async function renderPage(fields) {
       } catch (e) { console.warn(`Barcode error [${f.data}]:`, e.message); }
 
     } else if (f.type === 'qr') {
-      const size = Math.round(f.mag * 40 * S);
-      const qrCanvas = document.createElement('canvas');
-      // Try error levels from highest capacity (L) to lowest (H)
-      let qrOk = false;
-      for (const ecl of ['L', 'M', 'Q', 'H']) {
-        try {
-          await new Promise((res, rej) =>
-            QRCode.toCanvas(qrCanvas, f.data, {
+      try {
+        const size = Math.round(f.mag * 40 * S);
+        const qx   = Math.round(f.x * S);
+        const qy   = Math.round(f.y * S);
+        let drawn  = false;
+        // Try error levels from highest data capacity to lowest
+        for (const ecl of ['L', 'M', 'Q', 'H']) {
+          try {
+            // toDataURL returns a Promise when no callback is supplied
+            const dataUrl = await QRCode.toDataURL(f.data, {
               width: size, margin: 0, errorCorrectionLevel: ecl,
               color: { dark: '#000000', light: '#ffffff' },
-            }, err => err ? rej(err) : res()));
-          ctx.drawImage(qrCanvas, Math.round(f.x * S), Math.round(f.y * S), size, size);
-          qrOk = true;
-          break;
-        } catch (e) { /* try next level */ }
-      }
-      if (!qrOk) console.warn('QR code failed for all error correction levels');
+            });
+            const img = new Image();
+            await new Promise((res, rej) => {
+              img.onload = res;
+              img.onerror = rej;
+              img.src = dataUrl;
+            });
+            ctx.drawImage(img, qx, qy, size, size);
+            drawn = true;
+            break;
+          } catch (_) { /* try next level */ }
+        }
+        if (!drawn) console.warn('QR code failed for all error correction levels, data length:', f.data.length);
+      } catch (e) { console.warn('QR render error:', e); }
     }
   }
 
