@@ -1,0 +1,1051 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ZPL → PDF Converter</title>
+  <style>
+    :root {
+      --bg: #0d0d14;
+      --surface: #16161f;
+      --surface2: #1e1e2c;
+      --surface3: #252538;
+      --accent: #7c6fff;
+      --accent2: #a78bfa;
+      --accent3: #c084fc;
+      --text: #e2e2f0;
+      --text-muted: #6b6b8a;
+      --border: #252540;
+      --success: #4ade80;
+      --warning: #fbbf24;
+      --radius: 14px;
+      --radius-sm: 8px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Header ── */
+    header {
+      background: linear-gradient(135deg, #12122a 0%, #0d0d1a 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 18px 36px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(12px);
+    }
+
+    .logo-wrap {
+      width: 44px;
+      height: 44px;
+      background: linear-gradient(135deg, var(--accent), var(--accent3));
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      flex-shrink: 0;
+      box-shadow: 0 4px 16px rgba(124, 111, 255, 0.4);
+    }
+
+    .header-text h1 {
+      font-size: 19px;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent2), var(--accent3));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.3px;
+    }
+
+    .header-text p {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .header-badge {
+      margin-left: auto;
+      background: rgba(124, 111, 255, 0.12);
+      border: 1px solid rgba(124, 111, 255, 0.3);
+      color: var(--accent2);
+      padding: 5px 14px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    /* ── Main ── */
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 36px 24px 64px;
+    }
+
+    /* ── Upload Zone ── */
+    .upload-zone {
+      position: relative;
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 52px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      background: var(--surface);
+      overflow: hidden;
+    }
+
+    .upload-zone::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at 50% 100%, rgba(124, 111, 255, 0.06) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .upload-zone:hover,
+    .upload-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(124, 111, 255, 0.04);
+      transform: translateY(-1px);
+    }
+
+    .upload-zone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+
+    .upload-icon { font-size: 52px; margin-bottom: 18px; line-height: 1; }
+
+    .upload-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+
+    .upload-hint {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .upload-hint span {
+      color: var(--accent2);
+      font-weight: 600;
+    }
+
+    .file-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(74, 222, 128, 0.1);
+      border: 1px solid rgba(74, 222, 128, 0.3);
+      color: var(--success);
+      padding: 6px 18px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-top: 20px;
+      display: none;
+    }
+
+    /* ── Stats ── */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin: 20px 0;
+      display: none;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 18px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 32px;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--accent2), var(--accent3));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    /* ── Actions ── */
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 20px 0;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 11px 22px;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-decoration: none;
+      letter-spacing: 0.01em;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), #818cf8);
+      color: white;
+      box-shadow: 0 2px 12px rgba(124, 111, 255, 0.3);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 24px rgba(124, 111, 255, 0.45);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover:not(:disabled) {
+      border-color: var(--accent);
+      color: var(--accent2);
+      background: rgba(124, 111, 255, 0.05);
+    }
+
+    .btn-ghost:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+
+    .status-text {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
+    /* ── Spinner ── */
+    .spinner {
+      width: 15px;
+      height: 15px;
+      border: 2px solid rgba(255, 255, 255, 0.25);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: none;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Preview ── */
+    .preview-section {
+      display: none;
+    }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .section-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .preview-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .preview-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+
+    .preview-card:hover {
+      border-color: rgba(124, 111, 255, 0.3);
+    }
+
+    .preview-card-header {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--text-muted);
+      background: var(--surface2);
+    }
+
+    .page-pill {
+      background: linear-gradient(135deg, var(--accent), #818cf8);
+      color: white;
+      border-radius: 4px;
+      padding: 2px 9px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .preview-canvas-wrap {
+      padding: 12px;
+      background: #f5f5f5;
+    }
+
+    .preview-canvas-wrap canvas {
+      display: block;
+      width: 100%;
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+
+    /* ── Progress bar ── */
+    .progress-wrap {
+      height: 3px;
+      background: var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+      margin-bottom: 20px;
+      display: none;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent3));
+      border-radius: 999px;
+      transition: width 0.3s ease;
+      width: 0%;
+    }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      background: var(--surface2);
+      border: 1px solid var(--success);
+      color: var(--success);
+      padding: 12px 22px;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 600;
+      display: none;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      animation: slideIn 0.3s ease;
+      z-index: 9999;
+    }
+
+    @keyframes slideIn {
+      from { transform: translateX(20px); opacity: 0; }
+      to   { transform: translateX(0);    opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo-wrap">🏷️</div>
+  <div class="header-text">
+    <h1>ZPL → PDF Converter</h1>
+    <p>Converta etiquetas ZPL para PDF com visualização prévia</p>
+  </div>
+  <div class="header-badge">Sistema RAM</div>
+</header>
+
+<main>
+
+  <!-- Upload -->
+  <div class="upload-zone" id="dropZone">
+    <input type="file" id="fileInput" accept=".txt,.zpl">
+    <div class="upload-icon" id="uploadIcon">📂</div>
+    <div class="upload-title">Arraste o arquivo ZPL ou clique para carregar</div>
+    <div class="upload-hint">Aceita arquivos <span>.txt</span> e <span>.zpl</span> com comandos ZPL da Zebra</div>
+    <div class="file-badge" id="fileBadge">✅ <span id="filenameTxt"></span></div>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-bar" id="progressBar"></div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-row" id="statsRow">
+    <div class="stat-card">
+      <div class="stat-value" id="statPages">0</div>
+      <div class="stat-label">Etiquetas</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="statBarcodes">0</div>
+      <div class="stat-label" id="stat2Label">Códigos de Barras</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="statTexts">0</div>
+      <div class="stat-label" id="stat3Label">Campos de Texto</div>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="actions">
+    <button class="btn btn-primary" id="btnPdf" disabled>
+      <div class="spinner" id="spinner"></div>
+      <span>⬇️ Gerar PDF</span>
+    </button>
+    <button class="btn btn-ghost" id="btnClear" disabled>🗑️ Limpar</button>
+    <span class="status-text" id="statusText"></span>
+  </div>
+
+  <!-- Preview -->
+  <div class="preview-section" id="previewSection">
+    <div class="section-title">Pré-visualização das etiquetas</div>
+    <div class="preview-grid" id="previewGrid"></div>
+  </div>
+
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+
+<script>
+'use strict';
+
+// ─────────────────────────────────────────────
+// Format Detection
+// ─────────────────────────────────────────────
+
+/**
+ * Detect whether the file uses ZPL text commands or GRF bitmap images.
+ * Returns 'grf' or 'zpl'.
+ */
+function detectFormat(content) {
+  // GRF format: ~DG command downloads a compressed bitmap
+  if (/~DGR?:[^,]+,\d+,\d+,[^:]*:Z64:/i.test(content)) return 'grf';
+  return 'zpl';
+}
+
+// ─────────────────────────────────────────────
+// GRF / Z64 Bitmap Parser & Renderer
+// ─────────────────────────────────────────────
+
+/**
+ * Extract all ~DG Z64 bitmap blocks from content.
+ * Each block represents one label image.
+ */
+function parseGRF(content) {
+  const pages = [];
+  // ~DGR:NAME,totalBytes,bytesPerRow,[:type:]base64[:crc]
+  const rx = /~DGR?:[^,]+,(\d+),(\d+),[^:]*:Z64:([\s\S]+?):[0-9A-Fa-f]{4}/g;
+  let m;
+  while ((m = rx.exec(content)) !== null) {
+    pages.push({
+      totalBytes:  parseInt(m[1]),
+      bytesPerRow: parseInt(m[2]),
+      b64data:     m[3].replace(/[\r\n\s]/g, ''),
+    });
+  }
+  return pages;
+}
+
+/**
+ * Render a GRF page (1-bit bitmap) to a canvas element.
+ * In ZPL GRF: bit=1 → black, bit=0 → white (MSB first).
+ */
+async function renderGRFPage(grf) {
+  // 1. Base64 decode
+  const b64 = grf.b64data;
+  const binStr = atob(b64);
+  const compressed = new Uint8Array(binStr.length);
+  for (let i = 0; i < binStr.length; i++) compressed[i] = binStr.charCodeAt(i);
+
+  // 2. Zlib decompress with pako
+  let raw;
+  try {
+    raw = pako.inflate(compressed);
+  } catch (e) {
+    // Try raw deflate fallback
+    raw = pako.inflateRaw(compressed);
+  }
+
+  // 3. Calculate dimensions
+  const bytesPerRow = grf.bytesPerRow;
+  const rows = Math.floor(raw.length / bytesPerRow);
+  const cols = bytesPerRow * 8;
+
+  // 4. Render to canvas
+  const canvas = document.createElement('canvas');
+  canvas.width  = cols;
+  canvas.height = rows;
+  const ctx = canvas.getContext('2d');
+
+  const imgData = ctx.createImageData(cols, rows);
+  const px = imgData.data;
+
+  for (let row = 0; row < rows; row++) {
+    for (let b = 0; b < bytesPerRow; b++) {
+      const byte = raw[row * bytesPerRow + b];
+      for (let bit = 7; bit >= 0; bit--) {
+        const col   = b * 8 + (7 - bit);
+        const isBlack = (byte >> bit) & 1;
+        const idx   = (row * cols + col) * 4;
+        const c     = isBlack ? 0 : 255;
+        px[idx] = px[idx + 1] = px[idx + 2] = c;
+        px[idx + 3] = 255;
+      }
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+  return canvas;
+}
+
+// ─────────────────────────────────────────────
+// ZPL Parser
+// ─────────────────────────────────────────────
+
+/**
+ * Decode ZPL hex-encoded string (^FH mode).
+ * Patterns like _C3_A1 become the UTF-8 bytes 0xC3, 0xA1 → "á"
+ */
+function decodeZPLHex(str) {
+  const bytes = [];
+  let i = 0;
+  while (i < str.length) {
+    if (str[i] === '_' && i + 2 < str.length) {
+      const hex = str.slice(i + 1, i + 3);
+      if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
+        bytes.push(parseInt(hex, 16));
+        i += 3;
+        continue;
+      }
+    }
+    bytes.push(str.charCodeAt(i) & 0xFF);
+    i++;
+  }
+  return new TextDecoder('utf-8').decode(new Uint8Array(bytes));
+}
+
+/**
+ * Parse a full ZPL file string.
+ * Returns an array of pages; each page is an array of field objects.
+ */
+function parseZPL(content) {
+  content = content.replace(/\r/g, '');
+  const pages = [];
+  const blockRx = /\^XA([\s\S]*?)\^XZ/g;
+  let m;
+  while ((m = blockRx.exec(content)) !== null) {
+    const fields = parseBlock(m[1]);
+    if (fields.length > 0) pages.push(fields);
+  }
+  return pages;
+}
+
+/**
+ * Parse one ^XA...^XZ block into field descriptors.
+ */
+function parseBlock(block) {
+  // Split on ^ — each token is a command
+  const tokens = block.split('^').map(t => t.trim()).filter(Boolean);
+
+  const fields = [];
+  const st = {
+    lhX: 0, lhY: 0,
+    foX: 0, foY: 0,
+    fontH: 20, fontW: 20,
+    block: null,
+    hexMode: false,
+    barWidth: 2,
+    pendingBC: null,
+  };
+
+  for (const tok of tokens) {
+    const UP = tok.toUpperCase();
+
+    if (UP.startsWith('LH')) {
+      const [x = 0, y = 0] = tok.slice(2).split(',').map(Number);
+      st.lhX = x; st.lhY = y;
+
+    } else if (UP.startsWith('FO')) {
+      const parts = tok.slice(2).split(',');
+      st.foX = st.lhX + (parseInt(parts[0]) || 0);
+      st.foY = st.lhY + (parseInt(parts[1]) || 0);
+
+    } else if (/^A0N?,/i.test(tok)) {
+      // ^A0N,h,w  or  ^A0,h,w
+      const rest = tok.replace(/^A0N?,/i, '');
+      const parts = rest.split(',');
+      st.fontH = parseInt(parts[0]) || 20;
+      st.fontW = parseInt(parts[1]) || 20;
+      st.block = null;
+
+    } else if (UP.startsWith('FB')) {
+      const parts = tok.slice(2).split(',');
+      st.block = {
+        width: parseInt(parts[0]) || 300,
+        maxLines: parseInt(parts[1]) || 1,
+        lineSpacing: parseInt(parts[2]) || 0,
+        just: (parts[3] || 'L').toUpperCase().trim(),
+      };
+
+    } else if (UP === 'FH') {
+      st.hexMode = true;
+
+    } else if (UP.startsWith('BY')) {
+      st.barWidth = parseInt(tok.slice(2).split(',')[0]) || 2;
+
+    } else if (/^BCN?,/i.test(tok)) {
+      // ^BCN,height,printInterpLine,above
+      const rest = tok.replace(/^BCN?,/i, '');
+      const parts = rest.split(',');
+      st.pendingBC = {
+        height: parseInt(parts[0]) || 50,
+        barWidth: st.barWidth,
+      };
+
+    } else if (UP.startsWith('FD')) {
+      let data = tok.slice(2).trim();
+
+      if (st.hexMode) {
+        data = decodeZPLHex(data);
+        st.hexMode = false;
+      }
+
+      if (st.pendingBC) {
+        if (data) {
+          fields.push({
+            type: 'barcode',
+            x: st.foX, y: st.foY,
+            data,
+            height: st.pendingBC.height,
+            barWidth: st.pendingBC.barWidth,
+          });
+        }
+        st.pendingBC = null;
+      } else if (data) {
+        fields.push({
+          type: 'text',
+          x: st.foX, y: st.foY,
+          data,
+          fontH: st.fontH,
+          fontW: st.fontW,
+          block: st.block ? { ...st.block } : null,
+        });
+      }
+      st.block = null;
+
+    } else if (UP === 'FS') {
+      st.hexMode = false;
+      st.pendingBC = null;
+    }
+    // Ignore: XA, XZ, CI, LH (handled), etc.
+  }
+
+  return fields;
+}
+
+// ─────────────────────────────────────────────
+// Canvas Renderer
+// ─────────────────────────────────────────────
+
+const PIXEL_PER_DOT = 2;      // canvas scale
+const MM_PER_DOT    = 25.4 / 203; // physical size (203 dpi Zebra)
+
+function getBounds(fields) {
+  let maxX = 120, maxY = 120;
+  for (const f of fields) {
+    if (f.type === 'text') {
+      const w = f.block
+        ? f.block.width
+        : Math.min(f.data.length * f.fontW * 0.65, 600);
+      maxX = Math.max(maxX, f.x + w);
+      maxY = Math.max(maxY, f.y + f.fontH + 4);
+    } else {
+      maxX = Math.max(maxX, f.x + 160); // estimate barcode width
+      maxY = Math.max(maxY, f.y + f.height + 4);
+    }
+  }
+  return { w: maxX + 24, h: maxY + 24 };
+}
+
+function wrapText(ctx, text, maxPx) {
+  const words = text.split(' ');
+  const lines = [];
+  let line = '';
+  for (const w of words) {
+    const test = line ? `${line} ${w}` : w;
+    if (ctx.measureText(test).width <= maxPx) {
+      line = test;
+    } else {
+      if (line) lines.push(line);
+      line = w;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+async function renderPage(fields) {
+  const { w, h } = getBounds(fields);
+  const S = PIXEL_PER_DOT;
+  const canvas = document.createElement('canvas');
+  canvas.width  = Math.ceil(w * S);
+  canvas.height = Math.ceil(h * S);
+
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (const f of fields) {
+    if (f.type === 'text') {
+      const px = Math.round(f.fontH * S);
+      ctx.font = `${px}px Arial, sans-serif`;
+      ctx.fillStyle = '#000000';
+      ctx.textBaseline = 'top';
+
+      const x = Math.round(f.x * S);
+      const y = Math.round(f.y * S);
+
+      if (f.block && f.block.maxLines > 1) {
+        const maxPx   = f.block.width * S;
+        const lines   = wrapText(ctx, f.data, maxPx);
+        const visible = lines.slice(0, f.block.maxLines);
+        const lineH   = Math.round(px * 1.25);
+        for (let i = 0; i < visible.length; i++) {
+          ctx.fillText(visible[i], x, y + i * lineH, maxPx);
+        }
+      } else {
+        const maxW = f.block ? f.block.width * S : undefined;
+        ctx.fillText(f.data, x, y, maxW);
+      }
+
+    } else if (f.type === 'barcode') {
+      try {
+        const bc = document.createElement('canvas');
+        JsBarcode(bc, f.data, {
+          format: 'CODE128',
+          width:        Math.max(1, f.barWidth * S),
+          height:       Math.round(f.height * S),
+          displayValue: false,
+          margin:       0,
+          background:   '#ffffff',
+        });
+        ctx.drawImage(bc, Math.round(f.x * S), Math.round(f.y * S));
+      } catch (e) {
+        console.warn(`Barcode error [${f.data}]:`, e.message);
+      }
+    }
+  }
+
+  return canvas;
+}
+
+// ─────────────────────────────────────────────
+// App
+// ─────────────────────────────────────────────
+
+let parsedPages  = [];
+let canvasList   = [];
+let loadedFile   = null;
+let loadedFormat = 'zpl'; // 'zpl' | 'grf'
+
+const $ = id => document.getElementById(id);
+
+const fileInput     = $('fileInput');
+const dropZone      = $('dropZone');
+const btnPdf        = $('btnPdf');
+const btnClear      = $('btnClear');
+const spinner       = $('spinner');
+const statusText    = $('statusText');
+const previewSection = $('previewSection');
+const previewGrid   = $('previewGrid');
+const statsRow      = $('statsRow');
+const progressWrap  = $('progressWrap');
+const progressBar   = $('progressBar');
+const toast         = $('toast');
+
+function setStatus(msg) { statusText.textContent = msg; }
+
+function setProgress(pct) {
+  progressWrap.style.display = 'block';
+  progressBar.style.width = `${pct}%`;
+  if (pct >= 100) setTimeout(() => { progressWrap.style.display = 'none'; }, 500);
+}
+
+function showToast(msg, color = 'var(--success)') {
+  toast.textContent = msg;
+  toast.style.borderColor = color;
+  toast.style.color = color;
+  toast.style.display = 'block';
+  setTimeout(() => { toast.style.display = 'none'; }, 3200);
+}
+
+async function handleFile(file) {
+  if (!file) return;
+  loadedFile = file;
+
+  $('filenameTxt').textContent  = file.name;
+  $('fileBadge').style.display  = 'inline-flex';
+  $('uploadIcon').textContent   = '📄';
+  setStatus('Lendo arquivo...');
+  setProgress(10);
+
+  const text = await file.text();
+  setProgress(20);
+
+  const format = detectFormat(text);
+  loadedFormat = format;
+
+  if (format === 'grf') {
+    await handleGRF(text);
+  } else {
+    await handleZPL(text);
+  }
+}
+
+async function handleGRF(text) {
+  setStatus('Formato GRF detectado — decodificando bitmaps Z64...');
+
+  const grfPages = parseGRF(text);
+
+  if (grfPages.length === 0) {
+    setStatus('⚠️ Nenhuma imagem GRF encontrada no arquivo.');
+    setProgress(0);
+    return;
+  }
+
+  const bitsPerImg = grfPages[0].bytesPerRow * 8;
+  const rows       = Math.floor(grfPages[0].totalBytes / grfPages[0].bytesPerRow);
+
+  $('statPages').textContent    = grfPages.length;
+  $('statBarcodes').textContent = `${bitsPerImg}px`;
+  $('statTexts').textContent    = `${rows}px`;
+  $('stat2Label').textContent   = 'Largura';
+  $('stat3Label').textContent   = 'Altura';
+  statsRow.style.display        = 'grid';
+
+  previewGrid.innerHTML = '';
+  canvasList = [];
+  previewSection.style.display = 'block';
+  setStatus(`Renderizando ${grfPages.length} etiqueta(s) bitmap...`);
+
+  for (let i = 0; i < grfPages.length; i++) {
+    setProgress(20 + Math.round(((i + 1) / grfPages.length) * 75));
+    await new Promise(r => requestAnimationFrame(r));
+
+    const cv = await renderGRFPage(grfPages[i]);
+    canvasList.push(cv);
+
+    const card = document.createElement('div');
+    card.className = 'preview-card';
+    card.innerHTML = `
+      <div class="preview-card-header">
+        <span class="page-pill">Etiqueta ${i + 1}</span>
+        <span>Bitmap ${cv.width}×${cv.height}px · GRF / Z64</span>
+      </div>
+      <div class="preview-canvas-wrap"></div>
+    `;
+    card.querySelector('.preview-canvas-wrap').appendChild(cv);
+    previewGrid.appendChild(card);
+  }
+
+  setProgress(100);
+  btnPdf.disabled   = false;
+  btnClear.disabled = false;
+  setStatus(`✅ ${grfPages.length} etiqueta(s) GRF renderizada(s)`);
+}
+
+async function handleZPL(text) {
+  setStatus('Formato ZPL texto — processando comandos...');
+
+  parsedPages = parseZPL(text);
+
+  if (parsedPages.length === 0) {
+    setStatus('⚠️ Nenhuma etiqueta ZPL encontrada no arquivo.');
+    setProgress(0);
+    return;
+  }
+
+  const totalBarcodes = parsedPages.reduce((s, p) => s + p.filter(f => f.type === 'barcode').length, 0);
+  const totalTexts    = parsedPages.reduce((s, p) => s + p.filter(f => f.type === 'text').length, 0);
+
+  $('statPages').textContent    = parsedPages.length;
+  $('statBarcodes').textContent = totalBarcodes;
+  $('statTexts').textContent    = totalTexts;
+  $('stat2Label').textContent   = 'Códigos de Barras';
+  $('stat3Label').textContent   = 'Campos de Texto';
+  statsRow.style.display        = 'grid';
+
+  previewGrid.innerHTML = '';
+  canvasList = [];
+  previewSection.style.display = 'block';
+  setStatus(`Renderizando ${parsedPages.length} página(s)...`);
+
+  for (let i = 0; i < parsedPages.length; i++) {
+    setProgress(20 + Math.round(((i + 1) / parsedPages.length) * 75));
+    await new Promise(r => requestAnimationFrame(r));
+
+    const cv = await renderPage(parsedPages[i]);
+    canvasList.push(cv);
+
+    const pageBarcodes = parsedPages[i].filter(f => f.type === 'barcode').length;
+    const pageTexts    = parsedPages[i].filter(f => f.type === 'text').length;
+
+    const card = document.createElement('div');
+    card.className = 'preview-card';
+    card.innerHTML = `
+      <div class="preview-card-header">
+        <span class="page-pill">Página ${i + 1}</span>
+        <span>${pageBarcodes} código(s) de barras · ${pageTexts} campo(s) de texto</span>
+      </div>
+      <div class="preview-canvas-wrap"></div>
+    `;
+    card.querySelector('.preview-canvas-wrap').appendChild(cv);
+    previewGrid.appendChild(card);
+  }
+
+  setProgress(100);
+  btnPdf.disabled   = false;
+  btnClear.disabled = false;
+  setStatus(`✅ ${parsedPages.length} página(s) · ${totalBarcodes} código(s) de barras`);
+}
+
+btnPdf.addEventListener('click', async () => {
+  if (!canvasList.length) return;
+
+  spinner.style.display = 'block';
+  btnPdf.disabled = true;
+  setStatus('Gerando PDF...');
+  await new Promise(r => setTimeout(r, 16));
+
+  try {
+    const { jsPDF } = window.jspdf;
+    function canvasToMM(cv) {
+      if (loadedFormat === 'grf') {
+        // GRF canvas pixels are native printer dots at 203 DPI
+        return { w: cv.width * MM_PER_DOT, h: cv.height * MM_PER_DOT };
+      } else {
+        // ZPL text canvas uses PIXEL_PER_DOT scale
+        return { w: (cv.width / PIXEL_PER_DOT) * MM_PER_DOT, h: (cv.height / PIXEL_PER_DOT) * MM_PER_DOT };
+      }
+    }
+
+    const first  = canvasToMM(canvasList[0]);
+    const orient = first.w > first.h ? 'landscape' : 'portrait';
+
+    const pdf = new jsPDF({ orientation: orient, unit: 'mm', format: [first.w, first.h] });
+
+    for (let i = 0; i < canvasList.length; i++) {
+      if (i > 0) {
+        const { w, h } = canvasToMM(canvasList[i]);
+        pdf.addPage([w, h], w > h ? 'landscape' : 'portrait');
+      }
+      const { w, h } = canvasToMM(canvasList[i]);
+      const img = canvasList[i].toDataURL('image/png');
+      pdf.addImage(img, 'PNG', 0, 0, w, h, undefined, 'FAST');
+    }
+
+    const name = (loadedFile?.name || 'etiquetas').replace(/\.[^.]+$/, '') + '.pdf';
+    pdf.save(name);
+
+    setStatus(`✅ PDF salvo: ${name}`);
+    showToast(`✅ PDF gerado com sucesso! (${parsedPages.length} pág.)`);
+  } catch (err) {
+    console.error(err);
+    setStatus(`❌ Erro: ${err.message}`);
+    showToast(`❌ ${err.message}`, 'var(--warning)');
+  } finally {
+    spinner.style.display = 'none';
+    btnPdf.disabled = false;
+  }
+});
+
+btnClear.addEventListener('click', () => {
+  parsedPages = []; canvasList = []; loadedFile = null; loadedFormat = 'zpl';
+  previewGrid.innerHTML        = '';
+  previewSection.style.display = 'none';
+  statsRow.style.display       = 'none';
+  btnPdf.disabled              = true;
+  btnClear.disabled            = true;
+  $('fileBadge').style.display = 'none';
+  $('uploadIcon').textContent  = '📂';
+  fileInput.value              = '';
+  progressWrap.style.display  = 'none';
+  setStatus('');
+});
+
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('drag-over');
+});
+
+dropZone.addEventListener('dragleave', () => {
+  dropZone.classList.remove('drag-over');
+});
+
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+</script>
+</body>
+</html>
