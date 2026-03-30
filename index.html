@@ -796,11 +796,15 @@ function getBounds(fields) {
         maxY = Math.max(maxY, f.y + f.fontH + 4);
       }
     } else if (f.type === 'barcode') {
+      // Estimate barcode length in dots: chars × modules/char × barWidth
+      const mpc = f.format === 'CODE39' ? 14 : 11;
+      const estDots = (f.data.length + 2) * mpc * (f.barWidth || 2);
       if (f.rotation === 'R' || f.rotation === 'L') {
+        // barcode height → horizontal extent; barcode length → vertical extent
         maxX = Math.max(maxX, f.x + f.height + 20);
-        maxY = Math.max(maxY, f.y + 250);
+        maxY = Math.max(maxY, f.y + estDots);
       } else {
-        maxX = Math.max(maxX, f.x + 200);
+        maxX = Math.max(maxX, f.x + estDots);
         maxY = Math.max(maxY, f.y + f.height + 4);
       }
     }
@@ -960,10 +964,12 @@ async function renderPage(fields) {
         const y   = Math.round(f.y * S);
         const rot = f.rotation || 'N';
         if (rot === 'R') {
+          // 90° CW: translate to (x + barHeight, y), rotate PI/2, draw at origin
+          // Result: barcode occupies (x, y) → (x+barHeight, y+barLength)
           ctx.save();
           ctx.translate(x + bc.height, y);
           ctx.rotate(Math.PI / 2);
-          ctx.drawImage(bc, 0, -bc.height);
+          ctx.drawImage(bc, 0, 0);
           ctx.restore();
         } else if (rot === 'L') {
           ctx.save();
